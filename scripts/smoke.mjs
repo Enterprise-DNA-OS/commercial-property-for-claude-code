@@ -1,0 +1,93 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import {spawnSync} from 'node:child_process';
+import {getDb,REPO_ROOT} from './lib/db.mjs';
+import {migrate} from './migrate.mjs';
+import {seed} from './seed.mjs';
+import {run,READS,TABLES,date,importReLeased} from './property.mjs';
+import {parseCsv} from './lib/csv.mjs';
+const temp=fs.mkdtempSync(path.join(os.tmpdir(),'property-test-'));
+process.env.DATABASE_URL=process.env.TEST_DATABASE_URL||'';process.env.DATA_DIR=path.join(temp,'db');process.env.OUTPUT_DIR=temp;
+let db,checks=0;
+function ok(v,msg){assert.ok(v,msg);checks++;}
+async function rejects(fn,re){await assert.rejects(fn,re);checks++;}
+function file(name,obj){const f=path.join(temp,name+'.json');fs.writeFileSync(f,JSON.stringify(obj));return '--data='+f;}
+function cli(script,args=[]){const result=spawnSync(process.execPath,[path.join(REPO_ROOT,'scripts',script),...args],{cwd:REPO_ROOT,env:process.env,encoding:'utf8'});assert.equal(result.status,0,result.stderr||result.stdout);return result.stdout;}
+try{
+ db=await getDb();await migrate(db);ok((await migrate(db)).ran.length===0,'repeat migration');await seed(db);await seed(db);
+ ok((await run(db,['leases'])).length===3,'idempotent seed');
+ for(const c of Object.keys(READS))ok(Array.isArray(await run(db,[c])),c);
+ ok((await run(db,['help'])).reads.length===21,'help');
+ const arrears=await run(db,['arrears']);ok(arrears.length===2&&Number(arrears.find(x=>x.code==='RENT-Q1').balance_cents)===400000,'part-paid balances');
+ ok((await run(db,['renewal-arrears'])).length===1,'cross-record renewal risk');
+ ok(Number((await run(db,['outgoings'])).find(x=>x.code==='OPEX-Q1').variance_cents)===80000,'recovery allocation');
+ ok((await run(db,['over-recoveries']))[0].code==='OPEX-M1','over recovery');
+ ok((await run(db,['vacancies']))[0].code==='Q3','vacant units');
+ ok((await run(db,['owner-exposure'])).length===2,'separate currencies');
+ ok((await run(db,['compliance'])).length===6,'known compliance gaps');
+ const l=(await run(db,['lease','harbour design tenancy'])).lease;ok(l.code==='LEASE-Q1','case insensitive');ok((await run(db,['lease',l.id.slice(0,8)])).lease.id===l.id,'partial UUID');
+ await rejects(()=>run(db,['lease','absent']),/No leases/);await rejects(()=>run(db,['leases','--typo']),/Unknown option/);await rejects(()=>run(db,['leases','extra']),/unexpected/);await rejects(()=>run(db,['wrong']),/Unknown command/);
+ assert.throws(()=>date('2026-02-30'));assert.throws(()=>parseCsv('A,A\n1,2'));assert.throws(()=>parseCsv('A\n"bad'));ok(parseCsv('\ufeffA,B\r\n"a,b","say ""hello"""')[0].B==='say "hello"','CSV quoting');
+ const owner=await run(db,['add','owners',file('owner',{code:'TEST-O',name:'Test Owner'})]);
+ const property=await run(db,['add','properties',file('property',{code:'TEST-P',name:'Test Property',owner_id:'TEST-O',jurisdiction:'NZ',currency:'NZD'})]);
+ await run(db,['add','units',file('unit',{code:'TEST-U',name:'Test Unit',property_id:'TEST-P',area_sqm:100})]);
+ const fields={code:'TEST-L',name:'Test Lease',tenant:'Test Tenant',unit_id:'TEST-U',start_on:'2026-01-01',end_on:'2027-12-31',annual_rent_cents:1000000,lease_reference:'SIGNED-TEST'};
+ const testLease=await run(db,['add','leases',file('lease',fields)]);
+ await rejects(()=>run(db,['add','leases',file('overlap',{...fields,code:'OVERLAP'})]),/Overlapping/);
+ await rejects(()=>run(db,['add','leases',file('bad-date',{...fields,code:'BAD',start_on:'2026-02-30'})]),/Invalid ISO/);
+ await rejects(()=>run(db,['add','leases',file('bad-field',{...fields,code:'BAD',evil:'x'})]),/Unsupported/);
+ await rejects(()=>run(db,['add','leases',file('bad-money',{...fields,code:'BAD',annual_rent_cents:0.5})]),/integer cents/);
+ await run(db,['add','charges',file('charge',{code:'TEST-C',name:'Test Rent',lease_id:'TEST-L',kind:'rent',due_on:'2026-01-01',amount_cents:50000})]);
+ await rejects(()=>run(db,['update','charges','TEST-C',file('bad-receipt',{received_cents:10000})]),/check constraint/);
+ await run(db,['update','charges','TEST-C',file('receipt',{received_cents:10000,reconciled_on:'2026-01-05',receipt_reference:'BANK-TEST'})]);
+ await run(db,['update','charges','TEST-C',file('receipt',{received_cents:10000,reconciled_on:'2026-01-05',receipt_reference:'BANK-TEST'})]);
+ ok(Number((await run(db,['lease','TEST-L'])).charges[0].received_cents)===10000,'cumulative receipts idempotent');
+ await rejects(()=>run(db,['update','charges','TEST-C',file('overpaid',{received_cents:60000})]),/check constraint/);
+ await run(db,['add','outgoings',file('outgoing',{code:'TEST-OUT',name:'Test Rates',lease_id:'TEST-L',period_start:'2026-01-01',period_end:'2026-12-31',cost_cents:99999,recovery_pct:33.3333,authority_reference:'Executed clause'})]);
+ ok(Number((await db.query("select recoverable_cents from property.recovery where code='TEST-OUT'"))[0].recoverable_cents)===33333,'rounding to cents');
+ await run(db,['add','reviews',file('review',{code:'TEST-R',name:'Test Review',lease_id:'TEST-L',due_on:'2027-01-01',notice_by:'2026-10-01',method:'fixed',proposed_annual_cents:1100000})]);
+ await rejects(()=>run(db,['update','reviews','TEST-R',file('bad-review',{status:'agreed'})]),/check constraint/);
+ await run(db,['update','reviews','TEST-R',file('review-done',{status:'agreed',agreed_on:'2026-10-01',agreed_reference:'Signed agreement'})]);
+ ok(Number((await run(db,['lease','TEST-L'])).lease.annual_rent_cents)===1000000,'agreed review does not silently change contracted rent');
+ await run(db,['add','maintenance',file('task',{code:'TEST-M',name:'Test door',unit_id:'TEST-U',due_on:'2026-10-01',priority:'routine'})]);
+ await rejects(()=>run(db,['update','maintenance','TEST-M',file('bad-close',{status:'closed'})]),/check constraint/);
+ await run(db,['update','maintenance','TEST-M',file('closed',{status:'closed',closed_reference:'Checked work'})]);
+ await run(db,['log','TEST-L','--author=Manager','--text=Tenant called','--date=2026-10-01']);
+ ok((await run(db,['lease','TEST-L'])).lease.last_contact_on==='2026-10-01','contact date');
+ await rejects(()=>db.query('update property.notes set body=$1 where lease_id=$2',['tampered',testLease.id]),/append-only/);
+ await rejects(()=>run(db,['update','notes','TEST-L',file('notes',{body:'tamper'})]),/Unsupported/);
+ await rejects(()=>run(db,['update','leases','TEST-L',file('move',{unit_id:'Q1'})]),/Unsupported/);
+ await run(db,['add','leases',file('same-name',{...fields,code:'TEST-L2',status:'proposed'})]);
+ await rejects(()=>run(db,['lease','Test Lease']),/Ambiguous.*TEST-L.*TEST-L2/);
+ const csv=path.join(REPO_ROOT,'examples/re-leased-tenancy-schedule.csv');
+ ok((await importReLeased(db,csv,{dry:true})).inserted===1,'dry run');ok(!(await db.query("select id from property.leases where code='RL-900'")).length,'dry rollback');
+ ok((await run(db,['import','re-leased','--file='+csv])).inserted===1,'standard mapped import');ok((await importReLeased(db,csv)).skipped===1,'repeat import');
+ const imported=(await run(db,['lease','RL-900'])).lease;ok(imported.status==='proposed'&&Number(imported.annual_rent_cents)===8400000,'source import exact annual amount and unverified status');
+ await rejects(()=>run(db,['update','leases','RL-900',file('activate',{status:'active'})]),/executed lease/);
+ await run(db,['update','leases','RL-900',file('activate-checked',{status:'active',lease_reference:'VERIFIED'})]);
+ const raw=fs.readFileSync(csv,'utf8');const changed=path.join(temp,'changed.csv');fs.writeFileSync(changed,raw.replace('84,000.00','85,000.00'));await rejects(()=>importReLeased(db,changed),/Changed imported/);
+ const atomic=path.join(temp,'atomic.csv');fs.writeFileSync(atomic,raw.replace('900','901')+raw.split('\n')[1].replace('900','902').replace('2026-11-01','31/02/2026')+'\n');await rejects(()=>importReLeased(db,atomic),/Ambiguous report/);ok(!(await db.query("select id from property.leases where code='RL-901'")).length,'atomic rollback');
+ fs.writeFileSync(atomic,raw.replace('900','901').replace('2026-11-01','01/11/2026'));ok((await importReLeased(db,atomic,{dateFormat:'DMY'})).inserted===1,'explicit date format');
+ fs.writeFileSync(atomic,raw.replace('900','903').replace('Tenancy ID','Source ID'));ok((await importReLeased(db,atomic,{map:{id:'Source ID'}})).inserted===1,'custom headers');
+ fs.writeFileSync(atomic,raw.replace('900','904').replace('NZD','AUD'));await rejects(()=>importReLeased(db,atomic),/Currency mismatch/);
+ fs.writeFileSync(atomic,raw+raw.split('\n')[1]+'\n');await rejects(()=>importReLeased(db,atomic),/Duplicate tenancy/);
+ await rejects(()=>run(db,['import','re-leased','--file='+csv,'--dry-run=false']),/boolean flag/);
+ // Seven-day boundary and jurisdiction scope.
+ const nsw=(await run(db,['lease','LEASE-M1'])).lease;
+ const seven=new Date(Date.parse(nsw.entered_on)-7*86400000).toISOString().slice(0,10);
+ await run(db,['update','leases','LEASE-M1',file('disclosure',{disclosure_on:seven})]);
+ ok(!(await run(db,['compliance'])).some(x=>x.record==='LEASE-M1'&&x.rule==='NSW-LESSOR'),'exact seven day delivery clears timing check');
+ await run(db,['update','leases','LEASE-M1',file('disclosure-missing',{disclosure_reference:null})]);ok((await run(db,['compliance'])).some(x=>x.rule==='NSW-LESSOR'),'missing evidence reopens flag');
+ ok(!(await run(db,['compliance'])).some(x=>x.record==='LEASE-Q1'&&x.rule.startsWith('NSW')),'NZ lease not checked against NSW retail law');
+ const snapshot=await run(db,['export']);ok(TABLES.every(t=>Array.isArray(snapshot[t])),'complete export');const out=path.join(temp,'backup.json');await run(db,['export','--out='+out]);await rejects(()=>run(db,['export','--out='+out]),/EEXIST/);
+ for(const cmd of ['draft-weekly','draft-arrears']){const draft=await run(db,[cmd,...(cmd==='draft-arrears'?['LEASE-Q1']:[])]);ok(!draft.sent&&fs.readFileSync(draft.file,'utf8').includes(cmd==='draft-weekly'?'LEASE-Q1':'Harbour Design'),'draft from data');}
+ ok(Number((await db.query("select count(*) n from pg_tables where schemaname='property' and rowsecurity"))[0].n)===TABLES.length,'RLS on every table');
+ await db.exec('create role property_test_reader');await db.exec('grant usage on schema property to property_test_reader');await db.exec('grant select on all tables in schema property to property_test_reader');await db.exec('set role property_test_reader');ok((await db.query('select * from property.leases')).length===0,'no public rows');ok((await db.query('select * from property.lease_register')).length===0,'views respect RLS');await db.exec('reset role');
+ await db.close();db=null;
+ ok(JSON.parse(cli('property.mjs',['leases','--json'])).length===8,'machine output');
+ const amb=spawnSync(process.execPath,['scripts/property.mjs','lease','Test Lease'],{cwd:REPO_ROOT,env:process.env,encoding:'utf8'});ok(amb.status===1&&amb.stderr.includes('TEST-L2'),'ambiguity exits 1');
+ cli('view.mjs');cli('docs.mjs');ok(fs.readFileSync(path.join(temp,'views/week.html'),'utf8').includes('Entry door closer'),'actual view records');for(const name of ['owner-statement','rent-review','outgoings-reconciliation','work-order'])ok(fs.readdirSync(path.join(temp,'docs-out',name)).length>0,name);
+ console.log(`PASS: ${checks} checks; 21 read commands, all writes, import rollback, currencies, lease overlap, evidence boundaries, drafts, documents and RLS (${process.env.TEST_DATABASE_URL?'PostgreSQL':'PGlite'}).`);
+}finally{await db?.close();fs.rmSync(temp,{recursive:true,force:true});}

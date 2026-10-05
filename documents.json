@@ -1,11 +1,62 @@
 [
   {
-    "name": "example",
-    "title": "TODO(author): the first document this industry must produce",
-    "for_each": "select gen_random_uuid() as id, 'Example' as name",
+    "name": "owner-statement",
+    "title": "Draft owner operating statement",
+    "for_each": "select id,name from property.owners order by code",
     "file": "name",
     "sections": [
-      { "title": "Details", "sql": "select 'replace me' as item, $1::text as record_id" }
+      {
+        "title": "Lease schedule",
+        "note": "Recorded annual rent only. This is not a trust account statement or distribution instruction.",
+        "sql": "select tenant,property,currency,annual_rent_cents,end_on from property.lease_register where owner=(select code from property.owners where id=$1) order by code"
+      },
+      {
+        "title": "Charges and recorded receipts",
+        "sql": "select code,name,currency,amount_cents,received_cents,balance_cents,due_on,reconciled_on,receipt_reference from property.balances where owner=(select code from property.owners where id=$1) order by due_on"
+      },
+      {
+        "title": "Outgoings recovery",
+        "sql": "select code,currency,recoverable_cents,recovered_cents,variance_cents from property.recovery where owner=(select code from property.owners where id=$1) order by code"
+      }
+    ]
+  },
+  {
+    "name": "rent-review",
+    "title": "Draft rent review brief",
+    "for_each": "select id,name from property.reviews where status='pending' order by code",
+    "file": "name",
+    "sections": [
+      {
+        "title": "Review terms",
+        "note": "Internal brief, not a served notice. Check the executed lease and agreed calculation before any notice or rent change. CPI values and market valuations must be supplied.",
+        "sql": "select l.tenant,l.property,l.currency,l.annual_rent_cents current_annual_cents,r.proposed_annual_cents,r.method,r.notice_by,r.due_on,l.lease_reference from property.reviews r join property.lease_register l on l.id=r.lease_id where r.id=$1"
+      }
+    ]
+  },
+  {
+    "name": "outgoings-reconciliation",
+    "title": "Draft outgoings reconciliation",
+    "for_each": "select id,name from property.leases order by code",
+    "file": "name",
+    "sections": [
+      {
+        "title": "Recorded allocation",
+        "note": "Amounts must be checked against invoices and the lease or disclosure authority. Positive variance is unrecovered; negative variance is an over-recovery for review.",
+        "sql": "select name,period_start,period_end,currency,cost_cents,recovery_pct,recoverable_cents,recovered_cents,variance_cents,authority_reference from property.recovery where lease_id=$1 order by code"
+      }
+    ]
+  },
+  {
+    "name": "work-order",
+    "title": "Draft maintenance work order",
+    "for_each": "select id,name from property.maintenance where status='open' order by code",
+    "file": "name",
+    "sections": [
+      {
+        "title": "Work requested",
+        "note": "Draft only. Confirm contractor availability, insurance and access arrangements before sending.",
+        "sql": "select m.code,m.name,u.name unit,p.address,m.contractor,m.priority,m.due_on,m.insurance_until from property.maintenance m join property.units u on u.id=m.unit_id join property.properties p on p.id=u.property_id where m.id=$1"
+      }
     ]
   }
 ]

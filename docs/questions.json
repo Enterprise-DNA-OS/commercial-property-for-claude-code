@@ -1,0 +1,42 @@
+[
+  [
+    "Which tenants owe money while their renewal deadline approaches?",
+    "renewal-arrears"
+  ],
+  [
+    "Which owners have the most overdue rent, kept separate by currency?",
+    "owner-exposure"
+  ],
+  [
+    "Where do recovered outgoings exceed the recorded lease allocation?",
+    "over-recoveries"
+  ],
+  [
+    "Which proposed rent increases have notice deadlines approaching?",
+    "review-uplift"
+  ],
+  [
+    "Which open jobs have contractor insurance that will not cover the work date?",
+    "contractor-check"
+  ],
+  [
+    "How much annual rent expires within six months for each owner?",
+    "expiry-exposure"
+  ],
+  [
+    "Which tenants have gone quiet for more than thirty days?",
+    "quiet-tenants"
+  ],
+  [
+    "Which occupied units have the highest annual rent per square metre?",
+    "rent-density"
+  ],
+  [
+    "Which active leases lack renewal dates or signed evidence?",
+    "lease-gaps"
+  ],
+  [
+    "Which building and retail lease records need evidence checked?",
+    "compliance"
+  ]
+]

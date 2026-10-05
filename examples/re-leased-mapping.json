@@ -1,0 +1,11 @@
+{
+  "id": "Tenancy ID",
+  "property": "Property",
+  "unit": "Area",
+  "tenant": "Tenancy",
+  "start": "Lease Start",
+  "end": "Lease End",
+  "rent": "Annual Rent",
+  "currency": "Currency",
+  "renewal": "Renewal Option Expiry Date"
+}
