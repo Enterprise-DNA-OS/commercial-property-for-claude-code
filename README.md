@@ -4,7 +4,7 @@ Leases, renewals, rent reviews, outgoings and maintenance in a database you own.
 
 | Do it yourself | We customise it | We run it for you |
 |---|---|---|
-| Free code. Install and operate it. Hosting and agent costs remain yours. | Your fields, lease rules, screens, connections and Re-Leased data mapping. [Discuss your version](https://enterprisedna.co/omni/book?offer=replace-software&utm_campaign=re-leased&utm_medium=github). | Installed and operated through Omni by Enterprise DNA. One setup fee, then a retainer. [See the offer](https://enterprisedna.co/omni/instead-of/re-leased). |
+| Free code. Install and operate it. Hosting and agent costs remain yours. | Your fields, lease rules, screens, connections and Re-Leased data mapping. [Discuss your version](https://enterprisedna.co/omni/book?offer=replace-software&utm_campaign=re-leased&utm_medium=github). | Installed and operated through Omni by Enterprise DNA. One setup fee, then a retainer. [See the offer](https://enterprisedna.co/omni/instead-of/re-leased?utm_source=github&utm_medium=readme&utm_campaign=re-leased). |
 
 ## Quick start
 
