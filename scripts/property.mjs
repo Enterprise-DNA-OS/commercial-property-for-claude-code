@@ -52,7 +52,7 @@ export async function resolve(db,type,ref){
 async function payload(db,type,obj,{update=false}={}){
  if(!FIELDS[type]||!obj||typeof obj!=='object'||Array.isArray(obj))throw Error('Unsupported record type or data');
  for(const [k,v] of Object.entries(obj)){
-  if(!FIELDS[type].includes(k)||update&&['code',...Object.keys(FK)].includes(k))throw Error('Unsupported field '+k);
+  if(!FIELDS[type].includes(k)||update&&['code','currency',...Object.keys(FK)].includes(k))throw Error('Unsupported field '+k);
   if(v===null)continue;
   if(k.endsWith('_on')||k.endsWith('_by')||k.endsWith('_until')||['bwof_due','period_start','period_end'].includes(k))date(v);
   else if(k.endsWith('_cents')){if(!Number.isSafeInteger(v)||v<0)throw Error(k+' must be nonnegative integer cents');}

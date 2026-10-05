@@ -59,6 +59,7 @@ try{
  await rejects(()=>db.query('update property.notes set body=$1 where lease_id=$2',['tampered',testLease.id]),/append-only/);
  await rejects(()=>run(db,['update','notes','TEST-L',file('notes',{body:'tamper'})]),/Unsupported/);
  await rejects(()=>run(db,['update','leases','TEST-L',file('move',{unit_id:'Q1'})]),/Unsupported/);
+ await rejects(()=>run(db,['update','properties','TEST-P',file('currency-change',{currency:'AUD'})]),/Unsupported/);
  await run(db,['add','leases',file('same-name',{...fields,code:'TEST-L2',status:'proposed'})]);
  await rejects(()=>run(db,['lease','Test Lease']),/Ambiguous.*TEST-L.*TEST-L2/);
  const csv=path.join(REPO_ROOT,'examples/re-leased-tenancy-schedule.csv');
